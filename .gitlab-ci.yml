@@ -1,0 +1,37 @@
+stages:          # List of stages for jobs, and their order of execution
+  - build-image
+  - publish-image
+  - deploy-app
+
+build-image-job:       
+  stage: build-image
+  script:
+    - cd counter-app
+    - docker image prune -f    
+    - docker build -t counter-app:$CI_COMMIT_SHORT_SHA .
+    - docker images
+
+push-image-job:   
+  stage: publish-image
+  script:
+    - docker tag counter-app:$CI_COMMIT_SHORT_SHA $DOCKER_USERNAME/counter-app:$CI_COMMIT_SHORT_SHA
+    - docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+    - docker push $DOCKER_USERNAME/counter-app:$CI_COMMIT_SHORT_SHA
+
+deploy-app-job:      
+  stage: deploy-app 
+  environment: production
+  before_script:
+  - 'command -v ssh-agent >/dev/null || ( apk add --update openssh )' 
+  - eval $(ssh-agent -s)
+  - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+  - mkdir -p ~/.ssh
+  - chmod 700 ~/.ssh
+  - ssh-keyscan 192.168.184.228 >> ~/.ssh/known_hosts
+  - chmod 644 ~/.ssh/known_hosts
+  script:
+    - ssh server@192.168.184.228 "sudo docker pull $DOCKER_USERNAME/counter-app:$CI_COMMIT_SHORT_SHA"
+    - ssh server@192.168.184.228 "sudo docker stop \$(docker ps -a -q) || true"
+    - ssh server@192.168.184.228 "sudo docker rm \$(docker ps -a -q) || true"
+    - ssh server@192.168.184.228 "sudo docker run -d -p 80:5000 $DOCKER_USERNAME/counter-app:$CI_COMMIT_SHORT_SHA"
+    
